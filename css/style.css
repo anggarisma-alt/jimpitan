@@ -323,3 +323,7 @@ h1,h2,h3,h4,h5,h6,.h1,.h2,.h3,.h4,.h5,.h6{color:var(--text);font-weight:800;lett
 .bn span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .bn i{font-size:20px}
 .c+.seg,.grid+.seg{margin-top:12px}
+
+/* tombol flash di atas video scan */
+.flash-btn{position:absolute;top:10px;right:10px;z-index:3;width:46px;height:46px;border-radius:50%;border:0;background:rgba(0,0,0,.55);color:#fff;font-size:21px;display:grid;place-items:center;transition:background .15s,box-shadow .15s}
+.flash-btn.on{background:var(--amber);color:#3b2400;box-shadow:0 0 22px rgba(245,158,11,.85)}

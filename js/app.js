@@ -379,7 +379,7 @@ $('#loginForm').addEventListener('submit', async e => {
   e.preventDefault();
   const u = $('#lgUser').value.trim(), p = $('#lgPin').value.trim(), er = $('#lgErr'), btn = $('#lgBtn');
   er.classList.add('d-none-i');
-  if (!u || !p) { er.classList.remove('d-none-i'); er.querySelector('span').textContent = 'Isi no. rumah/username dan PIN.'; return; }
+  if (!u || !p) { er.classList.remove('d-none-i'); er.querySelector('span').textContent = 'Isi username dan PIN.'; return; }
   btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Masuk…';
   try {
     const r = await loginReq(u, p);
@@ -444,7 +444,7 @@ PAGES.dashboard = {
 function greetHtml() {
   const u = S.user, h = Math.floor(jkt().min / 60);
   const sal = h < 11 ? 'Selamat pagi' : h < 15 ? 'Selamat siang' : h < 18 ? 'Selamat sore' : 'Selamat malam';
-  const peran = ({ admin: 'Admin', pengurus: 'Pengurus RT', warga: 'Warga', petugas: 'Petugas ronda' })[u.role];
+  const peran = u.role === 'petugas' && u.base === 'warga' ? 'Warga · Petugas ronda' : ({ admin: 'Admin', pengurus: 'Pengurus RT', warga: 'Warga', petugas: 'Petugas ronda' })[u.role];
   return '<div class="greet"><div><small>' + sal + ' 👋</small><b>' + esc(u.nama) + '</b></div><span class="sb info">' + esc(peran) + '</span></div>';
 }
 function qaHtml() {
@@ -526,7 +526,7 @@ ACT.pendRetry = () => Pending.flush();
 /* ===================================================================
  *  JIMPITAN
  * =================================================================== */
-const JP = { w: null, counts: {}, scanning: false, starting: false, camDenied: false, userStopped: false, wasActive: undefined, scanner: null, lastCode: '', lastAt: 0, tab: 'input', cal: {}, rekap: { mode: 'harian', tgl: '' } };
+const JP = { w: null, counts: {}, flashOk: false, scanning: false, starting: false, camDenied: false, userStopped: false, wasActive: undefined, scanner: null, lastCode: '', lastAt: 0, tab: 'input', cal: {}, rekap: { mode: 'harian', tgl: '' } };
 
 PAGES.jimpitan = {
   init() {
@@ -567,14 +567,17 @@ PAGES.jimpitan = {
   buildInput() {
     $('#jp-input').innerHTML =
       '<div id="jpJadwal" class="mb-3"></div>' +
-      '<div class="c"><div class="scan-box" id="scanBox" style="display:none"><div id="qr-reader"></div></div>' +
+      '<div class="c"><div class="scan-box" id="scanBox" style="display:none"><div id="qr-reader"></div><button type="button" class="flash-btn" id="btnFlash" data-act="flashToggle" aria-label="Nyalakan flash" aria-pressed="false" style="display:none"><i class="bi bi-lightning-charge-fill"></i></button></div>' +
       '<div class="d-flex gap-2"><button class="btn btn-brand flex-fill" id="btnScan" data-act="scanToggle"><i class="bi bi-qr-code-scan"></i><span>Scan QR rumah</span></button><button class="btn btn-ghost" id="btnFoto" data-act="scanFoto" aria-label="Scan QR dari foto" title="Scan QR dari foto"><i class="bi bi-image"></i></button></div>' +
       '<div class="muted mt-2" style="font-size:12.5px" id="scanMsg">Arahkan kamera ke QR di rumah warga. Setoran hanya dapat dicatat dengan memindai QR.</div>' +
       '<div class="form-check form-switch mt-2"><input class="form-check-input" type="checkbox" id="autoScanSw"><label class="form-check-label" for="autoScanSw" style="font-size:13px">Buka kamera otomatis</label></div>' +
+      '<div class="form-check form-switch mt-2"><input class="form-check-input" type="checkbox" id="flashSw"><label class="form-check-label" for="flashSw" style="font-size:13px"><i class="bi bi-lightning-charge"></i> Flash (senter) saat scan</label></div><div class="muted" id="flashHint" style="font-size:12px;display:none"></div>' +
       (isStaff() ? '<div class="mt-3"><label class="form-label">Tanggal setoran</label><input type="date" class="form-control" id="jpTgl" max="' + todayJ() + '" value="' + todayJ() + '"></div>' : '') + '</div>' +
       '<div id="jpEntry"></div><div id="jpPending"></div>';
     const sw = $('#autoScanSw'); sw.checked = Store.g('autoscan', true);
     sw.addEventListener('change', () => { Store.s('autoscan', sw.checked); JP.userStopped = false; JP.camDenied = false; if (sw.checked) autoScan(); else stopScan(); });
+    const fsw = $('#flashSw'); fsw.checked = Store.g('flash', false);
+    fsw.addEventListener('change', () => toggleFlash(fsw.checked));
     this.tickJadwal(); Pending.badge();
   }
 };
@@ -611,6 +614,7 @@ async function startScan(auto) {
     JP.scanning = true;
     $('#btnScan').innerHTML = '<i class="bi bi-stop-circle"></i><span>Hentikan kamera</span>';
     msg.textContent = 'Kamera aktif — arahkan ke QR di rumah warga.';
+    initFlash();
   } catch (e) {
     box.style.display = 'none'; JP.scanning = false; JP.camDenied = true;
     msg.innerHTML = '<span class="text-danger">Kamera tidak dapat dibuka (izin ditolak atau tidak tersedia). Ketuk “Scan QR rumah” untuk mencoba lagi, atau ketuk ikon foto untuk memindai QR dari foto.</span>';
@@ -622,11 +626,52 @@ async function startScan(auto) {
 async function stopScan(byUser) {
   if (byUser) JP.userStopped = true;
   try { if (JP.scanner && JP.scanning) await JP.scanner.stop(); } catch (e) { /* abaikan */ }
-  JP.scanning = false;
+  JP.scanning = false; JP.flashOk = false;
+  const fb = $('#btnFlash'); if (fb) { fb.style.display = 'none'; fb.classList.remove('on'); }
   const b = $('#btnScan'); if (b) b.innerHTML = '<i class="bi bi-qr-code-scan"></i><span>Scan QR rumah</span>';
   const sbx = $('#scanBox'); if (sbx) sbx.style.display = 'none';
   const m = $('#scanMsg'); if (m && !JP.camDenied) m.textContent = 'Kamera mati. Ketuk “Scan QR rumah” untuk menyalakan kamera.';
 }
+/* ---- Flash (senter): dikendalikan lewat track kamera yang sedang berjalan ---- */
+function scanTrack() {
+  const v = document.querySelector('#qr-reader video'), s = v && v.srcObject;
+  return s && s.getVideoTracks ? s.getVideoTracks()[0] : null;
+}
+function flashSupported() {
+  const t = scanTrack();
+  try { return !!(t && t.getCapabilities && t.getCapabilities().torch); } catch (e) { return false; }
+}
+async function setFlash(on) {
+  const t = scanTrack();
+  if (!t) return false;
+  try { await t.applyConstraints({ advanced: [{ torch: !!on }] }); return true; } catch (e) { return false; }
+}
+function paintFlash() {
+  const want = Store.g('flash', false), on = want && JP.flashOk && JP.scanning;
+  const sw = $('#flashSw'); if (sw) sw.checked = want;
+  const b = $('#btnFlash'); if (b) { b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); b.setAttribute('aria-label', on ? 'Matikan flash' : 'Nyalakan flash'); }
+}
+/** Dipanggil setiap kamera menyala (termasuk restart otomatis setelah Simpan): deteksi dukungan lalu terapkan pilihan tersimpan. */
+async function initFlash() {
+  const b = $('#btnFlash'), hint = $('#flashHint');
+  let ok = false;
+  for (let i = 0; i < 4 && !ok; i++) { ok = flashSupported(); if (!ok) await sleep(250); }
+  if (!JP.scanning) return;
+  JP.flashOk = ok;
+  if (b) b.style.display = ok ? '' : 'none';
+  if (hint) { hint.style.display = ok ? 'none' : ''; hint.textContent = 'Flash tidak didukung oleh kamera/perangkat ini.'; }
+  if (ok && Store.g('flash', false)) await setFlash(true);
+  paintFlash();
+}
+async function toggleFlash(want) {
+  Store.s('flash', !!want);
+  if (JP.scanning) {
+    if (!JP.flashOk) { toast('Flash tidak didukung oleh kamera ini.', 'warn'); Store.s('flash', false); }
+    else if (!(await setFlash(want))) { toast('Gagal mengatur flash.', 'warn'); Store.s('flash', !want); }
+  } else if (want) toast('Flash akan menyala saat kamera aktif.');
+  paintFlash();
+}
+ACT.flashToggle = () => toggleFlash(!Store.g('flash', false));
 ACT.scanToggle = () => JP.scanning ? stopScan(true) : startScan(false);
 /** Cadangan bila kamera langsung tidak bisa dipakai: foto QR (tetap barcode, bukan input manual). */
 ACT.scanFoto = () => pickFile(async f => {
@@ -1131,8 +1176,8 @@ TABS.md = async v => {
 async function mdWarga() {
   S.wargaList = await api('wargaList');
   const draw = q => {
-    const l = S.wargaList.filter(w => !q || w.nama_kk.toLowerCase().includes(q) || w.no_rumah.toLowerCase().includes(q));
-    $('#mdList').innerHTML = l.length ? l.map(w => '<div class="list-i" data-act="wgForm" data-id="' + w.id + '" style="cursor:pointer"><span class="avatar">' + esc(ini(w.nama_kk)) + '</span><div class="grow"><div class="t">' + esc(w.nama_kk) + '</div><div class="s">No. ' + esc(w.no_rumah) + ' · ' + esc(w.no_hp || 'HP belum diisi') + '</div></div>' + (w.status === 'aktif' ? '' : '<span class="sb na">Nonaktif</span>') + '<button class="icon-btn" aria-label="Lihat QR" data-act="qrShow" data-id="' + w.id + '"><i class="bi bi-qr-code"></i></button></div>').join('') : emptyH('people', 'Belum ada data warga.');
+    const l = S.wargaList.filter(w => !q || w.nama_kk.toLowerCase().includes(q) || w.no_rumah.toLowerCase().includes(q) || String(w.username || '').includes(q));
+    $('#mdList').innerHTML = l.length ? l.map(w => '<div class="list-i" data-act="wgForm" data-id="' + w.id + '" style="cursor:pointer"><span class="avatar">' + esc(ini(w.nama_kk)) + '</span><div class="grow"><div class="t">' + esc(w.nama_kk) + '</div><div class="s">No. ' + esc(w.no_rumah) + ' · @' + esc(w.username || '—') + (w.pin_default ? ' · <b style="color:var(--warn)">PIN bawaan</b>' : '') + '</div></div>' + (w.status === 'aktif' ? '' : '<span class="sb na">Nonaktif</span>') + '<button class="icon-btn" aria-label="Lihat QR" data-act="qrShow" data-id="' + w.id + '"><i class="bi bi-qr-code"></i></button></div>').join('') : emptyH('people', 'Belum ada data warga.');
   };
   $('#mdBody').innerHTML = '<div class="d-flex gap-2 mb-3"><div class="search flex-fill"><i class="bi bi-search"></i><input class="form-control" id="mdQ" placeholder="Cari warga"></div><button class="btn btn-brand" data-act="wgForm"><i class="bi bi-plus-lg"></i></button></div><button class="btn btn-soft w-100 mb-3" data-act="qrPrint"><i class="bi bi-printer"></i> Cetak QR massal (' + S.wargaList.filter(w => w.status === 'aktif').length + ' KK)</button><div class="c" id="mdList"></div>';
   draw('');
@@ -1146,9 +1191,9 @@ ACT.wgForm = (b, ev) => {
     body: '<div class="mb-3"><label class="form-label">Nama kepala keluarga</label><input class="form-control" id="wgN" maxlength="80" value="' + esc(w ? w.nama_kk : '') + '"></div>' +
       '<div class="grid g2 mb-3"><div><label class="form-label">No. rumah</label><input class="form-control" id="wgR" maxlength="12" value="' + esc(w ? w.no_rumah : '') + '"></div><div><label class="form-label">No. HP (WA)</label><input class="form-control" id="wgH" inputmode="tel" value="' + esc(w ? w.no_hp : '') + '" placeholder="08…"></div></div>' +
       '<div class="grid g2 mb-1"><div><label class="form-label">Mulai wajib iuran</label><input type="date" class="form-control" id="wgM" value="' + esc(w ? w.tgl_mulai : (S.boot.cfg.TGL_MULAI || todayJ())) + '"></div><div><label class="form-label">Status</label><select class="form-select" id="wgS"><option value="aktif"' + (w && w.status !== 'aktif' ? '' : ' selected') + '>Aktif</option><option value="nonaktif"' + (w && w.status !== 'aktif' ? ' selected' : '') + '>Nonaktif</option></select></div></div>' +
-      (w ? '' : '<div class="muted mt-2" style="font-size:12.5px">Akun login warga dibuat otomatis: username = no. rumah, PIN = PIN bawaan.</div>'),
-    foot: (w ? '<button class="btn btn-danger-soft" data-act="wgDel" data-id="' + w.id + '"><i class="bi bi-trash"></i></button>' : '') + '<button class="btn btn-ghost" data-bs-dismiss="modal">Batal</button><button class="btn btn-brand" id="wgOk">Simpan</button>',
-    onShow() { $('#wgOk').onclick = ev2 => act(ev2.currentTarget, async () => { await apiW('wargaSimpan', { id: w ? w.id : '', nama_kk: $('#wgN').value, no_rumah: $('#wgR').value, no_hp: $('#wgH').value, tgl_mulai: $('#wgM').value, status: $('#wgS').value }); Mdl.close(); toast('Data warga disimpan.'); invalidate(); S.loaded.master = Date.now(); mdWarga(); }); }
+      '<div class="mt-3"><label class="form-label">Username login</label><input class="form-control" id="wgU" maxlength="30" autocapitalize="off" autocomplete="off" value="' + esc(w ? w.username : '') + '" placeholder="' + (w ? '' : 'kosongkan = dibuat otomatis dari nama') + '"><div class="muted mt-1" style="font-size:12px">' + (w ? 'Warga masuk dengan username ini (bukan no. rumah). Jika warga ini anggota regu ronda, hak input jimpitan otomatis aktif di akun yang sama — tidak perlu akun baru.' : 'Warga masuk dengan username ini + PIN bawaan. Contoh otomatis: budi.santoso. Huruf kecil, angka, titik, garis bawah, atau tanda hubung.') + '</div></div>',
+    foot: (w ? '<button class="btn btn-danger-soft" data-act="wgDel" data-id="' + w.id + '"><i class="bi bi-trash"></i></button>' : '') + (w && w.user_id ? '<button class="btn btn-ghost" data-act="usReset" data-id="' + w.user_id + '"><i class="bi bi-key"></i> Reset PIN</button>' : '') + '<button class="btn btn-ghost" data-bs-dismiss="modal">Batal</button><button class="btn btn-brand" id="wgOk">Simpan</button>',
+    onShow() { $('#wgOk').onclick = ev2 => act(ev2.currentTarget, async () => { const r = await apiW('wargaSimpan', { id: w ? w.id : '', nama_kk: $('#wgN').value, no_rumah: $('#wgR').value, no_hp: $('#wgH').value, tgl_mulai: $('#wgM').value, status: $('#wgS').value, username: $('#wgU').value.trim() }); toast('Data warga disimpan.'); invalidate(); S.loaded.master = Date.now(); mdWarga(); if (!w) showAkunBaru([{ nama: $('#wgN').value.trim(), username: r.username, pin: r.pin }]); else Mdl.close(); }); }
   });
 };
 ACT.wgDel = async b => {
@@ -1170,10 +1215,8 @@ ACT.qrPrint = b => act(b, async () => {
 
 async function mdRegu() {
   if (!S.wargaList) S.wargaList = await api('wargaList');
-  MD.un = {};
-  try { (await api('users')).forEach(u => { if (u.role === 'petugas' && u.id_warga) MD.un[u.id_warga] = u.username; }); } catch (e) { /* abaikan */ }
-  const l = S.boot.regu, nm = id => { const w = S.wargaList.find(x => x.id === id); return w ? w.nama_kk + (MD.un[id] ? ' (' + MD.un[id] + ')' : '') : null; };
-  $('#mdBody').innerHTML = '<div class="insight info"><i class="bi bi-info-circle"></i><div>Petugas ronda dipilih dari <b>warga anggota regu</b>. Setiap anggota otomatis mendapat <b>akun petugas dengan username sendiri</b> (mis. ronda.budi — bukan no. rumah) untuk menginput jimpitan saat jadwal regunya aktif.</div></div>' +
+  const l = S.boot.regu, nm = id => { const w = S.wargaList.find(x => x.id === id); return w ? w.nama_kk : null; };
+  $('#mdBody').innerHTML = '<div class="insight info"><i class="bi bi-info-circle"></i><div>Petugas ronda dipilih dari <b>warga anggota regu</b>. Mereka <b>tetap masuk dengan username warganya</b> — tidak perlu akun baru. Hak input jimpitan otomatis aktif saat jadwal regunya.</div></div>' +
     '<button class="btn btn-brand w-100 mb-3" data-act="rgForm"><i class="bi bi-plus-lg"></i> Tambah regu</button>' +
     (l.length ? l.map(r => {
       const ang = String(r.anggota || '').split(',').filter(Boolean).map(nm).filter(Boolean);
@@ -1194,16 +1237,16 @@ ACT.rgForm = b => {
       const cnt = () => { $('#rgCnt').textContent = sel.size + ' dipilih'; };
       const draw = q => {
         const l = S.wargaList.filter(w => w.status === 'aktif' && (!q || w.nama_kk.toLowerCase().includes(q) || w.no_rumah.toLowerCase().includes(q)));
-        $('#rgAng').innerHTML = l.length ? l.map(w => '<label class="list-i" style="cursor:pointer;margin:0"><input type="checkbox" class="form-check-input m-0" data-id="' + w.id + '"' + (sel.has(w.id) ? ' checked' : '') + '><span class="grow"><span class="t" style="display:block">' + esc(w.nama_kk) + '</span><span class="s">No. ' + esc(w.no_rumah) + (MD.un[w.id] ? ' · akun: ' + esc(MD.un[w.id]) : '') + (lain[w.id] ? ' · juga di ' + esc(lain[w.id].join(', ')) : '') + '</span></span></label>').join('') : emptyH('people', 'Warga tidak ditemukan');
+        $('#rgAng').innerHTML = l.length ? l.map(w => '<label class="list-i" style="cursor:pointer;margin:0"><input type="checkbox" class="form-check-input m-0" data-id="' + w.id + '"' + (sel.has(w.id) ? ' checked' : '') + '><span class="grow"><span class="t" style="display:block">' + esc(w.nama_kk) + '</span><span class="s">No. ' + esc(w.no_rumah) + (lain[w.id] ? ' · juga di ' + esc(lain[w.id].join(', ')) : '') + '</span></span></label>').join('') : emptyH('people', 'Warga tidak ditemukan');
         cnt();
       };
       $('#rgAng').addEventListener('change', e => { const c = e.target.closest('input[data-id]'); if (!c) return; if (c.checked) sel.add(c.dataset.id); else sel.delete(c.dataset.id); cnt(); });
       $('#rgQ').addEventListener('input', debounce(e => draw(e.target.value.trim().toLowerCase()), 120));
       draw('');
       $('#rgOk').onclick = ev => act(ev.currentTarget, async () => {
-        const rr = await apiW('reguSimpan', { id: r ? r.id : '', nama_regu: $('#rgN').value, hari: $$('.chk-hari input:checked', body).map(x => x.value), jam_mulai: $('#rgA').value, jam_selesai: $('#rgB').value, anggota: Array.from(sel) });
+        await apiW('reguSimpan', { id: r ? r.id : '', nama_regu: $('#rgN').value, hari: $$('.chk-hari input:checked', body).map(x => x.value), jam_mulai: $('#rgA').value, jam_selesai: $('#rgB').value, anggota: Array.from(sel) });
         toast('Regu disimpan.'); await refreshBoot(); S.loaded.master = Date.now(); mdRegu();
-        if (rr.akunBaru && rr.akunBaru.length) showAkunBaru(rr.akunBaru); else Mdl.close();
+        Mdl.close();
       });
     }
   });
@@ -1270,15 +1313,15 @@ async function pgUser() {
   const [us] = await Promise.all([api('users'), S.wargaList ? 0 : api('wargaList').then(x => { S.wargaList = x; })]);
   PG.users = us;
   const RL = { admin: 'Admin', pengurus: 'Pengurus RT', petugas: 'Petugas Ronda', warga: 'Warga' };
-  $('#pgBody').innerHTML = '<button class="btn btn-brand w-100 mb-3" data-act="usForm"><i class="bi bi-person-plus"></i> Tambah pengguna</button><div class="c">' + us.map(u => '<div class="list-i" data-act="usForm" data-id="' + u.id + '" style="cursor:pointer"><span class="avatar">' + esc(ini(u.nama)) + '</span><div class="grow"><div class="t">' + esc(u.nama) + '</div><div class="s">@' + esc(u.username) + ' · ' + RL[u.role] + (u.regu ? ' · ' + esc(u.regu) : '') + '</div></div>' + (u.status === 'aktif' ? '' : '<span class="sb na">Nonaktif</span>') + '</div>').join('') + '</div>';
+  $('#pgBody').innerHTML = '<button class="btn btn-brand w-100 mb-3" data-act="usForm"><i class="bi bi-person-plus"></i> Tambah pengguna</button><div class="c">' + us.map(u => '<div class="list-i" data-act="usForm" data-id="' + u.id + '" style="cursor:pointer"><span class="avatar">' + esc(ini(u.nama)) + '</span><div class="grow"><div class="t">' + esc(u.nama) + '</div><div class="s">@' + esc(u.username) + ' · ' + RL[u.role] + (u.regu ? ' · ' + esc(u.regu) : '') + '</div></div>' + (u.pin_default && u.status === 'aktif' ? '<span class="sb kurang">PIN bawaan</span> ' : '') + (u.status === 'aktif' ? '' : '<span class="sb na">Nonaktif</span>') + '</div>').join('') + '</div>';
 }
 ACT.usForm = b => {
   const u = b.dataset.id ? PG.users.find(x => x.id === b.dataset.id) : null;
   Mdl.open({
     title: u ? 'Ubah pengguna' : 'Tambah pengguna',
     body: '<div class="mb-3"><label class="form-label">Nama</label><input class="form-control" id="usN" value="' + esc(u ? u.nama : '') + '"></div><div class="mb-3"><label class="form-label">Username / no. rumah</label><input class="form-control" id="usU" value="' + esc(u ? u.username : '') + '" autocapitalize="off"></div>' +
-      '<div class="grid g2 mb-3"><div><label class="form-label">Peran</label><select class="form-select" id="usR">' + [['admin', 'Admin'], ['pengurus', 'Pengurus RT'], ['warga', 'Warga'], ['petugas', 'Petugas ronda']].map(r => '<option value="' + r[0] + '"' + (u && u.role === r[0] ? ' selected' : '') + '>' + r[1] + '</option>').join('') + '</select></div><div><label class="form-label">Status</label><select class="form-select" id="usS"><option value="aktif">Aktif</option><option value="nonaktif"' + (u && u.status !== 'aktif' ? ' selected' : '') + '>Nonaktif</option></select></div></div>' +
-      '<div class="muted mb-3" style="font-size:12.5px">Akun petugas ronda dibuat otomatis saat warga ditambahkan ke regu (Master Data → Regu ronda). Di sini Anda dapat mengganti username atau PIN-nya.</div>' +
+      '<div class="grid g2 mb-3"><div><label class="form-label">Peran</label><select class="form-select" id="usR">' + [['admin', 'Admin'], ['pengurus', 'Pengurus RT'], ['warga', 'Warga']].concat(u && u.role === 'petugas' ? [['petugas', 'Petugas (akun lama)']] : []).map(r => '<option value="' + r[0] + '"' + (u && u.role === r[0] ? ' selected' : '') + '>' + r[1] + '</option>').join('') + '</select></div><div><label class="form-label">Status</label><select class="form-select" id="usS"><option value="aktif">Aktif</option><option value="nonaktif"' + (u && u.status !== 'aktif' ? ' selected' : '') + '>Nonaktif</option></select></div></div>' +
+      '<div class="muted mb-3" style="font-size:12.5px">Petugas ronda tidak perlu akun terpisah: tambahkan warga ke regu (Master Data → Regu ronda), lalu ia masuk dengan username warganya.</div>' +
       '<div class="mb-3" id="usWw"><label class="form-label">Terhubung ke warga</label><select class="form-select" id="usW"><option value="">—</option>' + wargaOpts(u ? u.id_warga : '') + '</select></div>' +
       '<div class="mb-3" id="usGw"><label class="form-label">Regu ronda</label><select class="form-select" id="usG"><option value="">—</option>' + S.boot.regu.map(r => '<option value="' + r.id + '"' + (u && u.id_regu === r.id ? ' selected' : '') + '>' + esc(r.nama_regu) + '</option>').join('') + '</select></div>' +
       '<div class="mb-1"><label class="form-label">' + (u ? 'PIN baru (kosongkan jika tidak diubah)' : 'PIN awal (kosong = PIN bawaan)') + '</label><input class="form-control" id="usP" inputmode="numeric" maxlength="8"></div>',
@@ -1314,10 +1357,10 @@ PAGES.menu = {
   init() {
     const u = S.user, RL = { admin: 'Admin', pengurus: 'Pengurus RT', petugas: 'Petugas Ronda', warga: 'Warga' };
     const rest = navAllowed().filter(n => !BOTTOM[u.role].includes(n.id));
-    $('#pg-menu').innerHTML = '<div class="c d-flex align-items-center gap-3"><span class="avatar" style="width:52px;height:52px;font-size:18px">' + esc(ini(u.nama)) + '</span><div><b style="font-size:17px">' + esc(u.nama) + '</b><div class="muted">' + RL[u.role] + ' · @' + esc(u.username) + '</div></div></div>' +
+    $('#pg-menu').innerHTML = '<div class="c d-flex align-items-center gap-3"><span class="avatar" style="width:52px;height:52px;font-size:18px">' + esc(ini(u.nama)) + '</span><div><b style="font-size:17px">' + esc(u.nama) + '</b><div class="muted">' + (u.role === 'petugas' && u.base === 'warga' ? 'Warga · Petugas ronda' : RL[u.role]) + ' · @' + esc(u.username) + '</div></div></div>' +
       (rest.length ? '<div class="c mt-3">' + rest.map(n => '<div class="list-i" data-act="nav" data-p="' + n.id + '" style="cursor:pointer"><div class="dot"><i class="bi bi-' + n.i + '"></i></div><div class="grow t">' + navTitle(n.id) + '</div><i class="bi bi-chevron-right muted"></i></div>').join('') + '</div>' : '') +
       '<div class="c mt-3"><div class="list-i" data-act="theme" style="cursor:pointer"><div class="dot"><i class="bi bi-moon-stars"></i></div><div class="grow t">Mode gelap / terang</div></div><div class="list-i" data-act="pin" style="cursor:pointer"><div class="dot"><i class="bi bi-key"></i></div><div class="grow t">Ganti PIN</div></div><div class="list-i" data-act="logout" style="cursor:pointer"><div class="dot" style="background:var(--bad-soft);color:var(--bad)"><i class="bi bi-box-arrow-right"></i></div><div class="grow t">Keluar</div></div></div>' +
-      '<div class="text-center muted mt-3" style="font-size:12px">Jimpitan RT v2.3 · ' + esc(S.boot.cfg.NAMA_RT) + '</div>';
+      '<div class="text-center muted mt-3" style="font-size:12px">Jimpitan RT v2.4 · ' + esc(S.boot.cfg.NAMA_RT) + '</div>';
   }
 };
 
@@ -1327,8 +1370,8 @@ PAGES.menu = {
 function showAkunBaru(list) {
   const txt = list.map(a => a.nama + ' — username: ' + a.username + ' — PIN: ' + a.pin).join('\n');
   Mdl.open({
-    title: 'Akun petugas dibuat',
-    body: '<div class="insight info"><i class="bi bi-info-circle"></i><div>Berikan username &amp; PIN ini ke masing-masing petugas, lalu minta mereka mengganti PIN setelah masuk pertama kali.</div></div>' +
+    title: 'Akun login dibuat',
+    body: '<div class="insight info"><i class="bi bi-info-circle"></i><div>Berikan username &amp; PIN ini ke yang bersangkutan, lalu minta mengganti PIN setelah masuk pertama kali.</div></div>' +
       list.map(a => '<div class="list-i"><span class="avatar">' + esc(ini(a.nama)) + '</span><div class="grow"><div class="t">' + esc(a.nama) + '</div><div class="s">Username: <b>' + esc(a.username) + '</b> · PIN awal: <b>' + esc(a.pin) + '</b></div></div></div>').join(''),
     foot: '<button class="btn btn-ghost" data-act="copyAkun" data-txt="' + esc(txt) + '"><i class="bi bi-clipboard"></i> Salin</button><button class="btn btn-brand" data-bs-dismiss="modal">Mengerti</button>'
   });
