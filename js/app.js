@@ -149,6 +149,26 @@ async function act(btn, fn) {
   finally { if (btn && btn.isConnected) { btn.disabled = false; btn.innerHTML = h; } }
 }
 
+/* ---------- Versi backend: peringatkan bila Apps Script belum di-deploy ulang ---------- */
+const MIN_BACKEND = '2.4.1';
+function verLt(a, b) {
+  const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
+  for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0); }
+  return false;
+}
+function checkVer(v) {
+  if (!v) return;
+  S.beVer = v;
+  const el = $('#verWarn');
+  if (!el) return;
+  if (verLt(v, MIN_BACKEND)) {
+    if (S.verClosed === v) return;
+    el.innerHTML = '<b>⚠ Backend Apps Script belum diperbarui</b> (versi ' + esc(v) + ', aplikasi butuh ≥ ' + MIN_BACKEND + '). Selama itu, <b>username warga & akun ronda tidak tersimpan dengan benar</b>. Perbaiki: Apps Script → tempel <code>Kode.gs</code> terbaru → jalankan <code>setupAppEnvironment</code> → Deploy → Kelola deployment → ✏ → <b>Versi: Baru</b>.<button type="button" class="vw-x" data-act="verClose" aria-label="Tutup peringatan">×</button>';
+    el.style.display = '';
+  } else el.style.display = 'none';
+}
+ACT.verClose = () => { S.verClosed = S.beVer; const el = $('#verWarn'); if (el) el.style.display = 'none'; };
+
 /* ---------- Lapisan API: dedupe, retry, timeout, reqId, telemetri ---------- */
 class ApiErr extends Error { constructor(m, code) { super(m); this.code = code; } }
 const Perf = { n: 0, tot: 0, srv: 0, slow: [] };
@@ -178,6 +198,7 @@ async function api(action, p, o) {
       for (let i = 0; ; i++) {
         try {
           const r = await rawCall({ action, token: S.token, p, reqId }, write ? 90000 : 45000);
+          if (r) checkVer(r.v);
           if (r && r.tk) { S.token = r.tk; Sess.save(); }
           if (r) { Perf.n++; Perf.tot += performance.now() - t0; Perf.srv += r.ms || 0; if ((r.ms || 0) > 3000) Perf.slow.push(action + ' ' + r.ms + 'ms'); }
           if (!r || !r.success) {
@@ -383,6 +404,7 @@ $('#loginForm').addEventListener('submit', async e => {
   btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Masuk…';
   try {
     const r = await loginReq(u, p);
+    checkVer(r && r.v);
     if (!r.success) throw new ApiErr(r.message);
     Store.s('lastUser', u);
     startApp(r.data);
@@ -1191,9 +1213,9 @@ ACT.wgForm = (b, ev) => {
     body: '<div class="mb-3"><label class="form-label">Nama kepala keluarga</label><input class="form-control" id="wgN" maxlength="80" value="' + esc(w ? w.nama_kk : '') + '"></div>' +
       '<div class="grid g2 mb-3"><div><label class="form-label">No. rumah</label><input class="form-control" id="wgR" maxlength="12" value="' + esc(w ? w.no_rumah : '') + '"></div><div><label class="form-label">No. HP (WA)</label><input class="form-control" id="wgH" inputmode="tel" value="' + esc(w ? w.no_hp : '') + '" placeholder="08…"></div></div>' +
       '<div class="grid g2 mb-1"><div><label class="form-label">Mulai wajib iuran</label><input type="date" class="form-control" id="wgM" value="' + esc(w ? w.tgl_mulai : (S.boot.cfg.TGL_MULAI || todayJ())) + '"></div><div><label class="form-label">Status</label><select class="form-select" id="wgS"><option value="aktif"' + (w && w.status !== 'aktif' ? '' : ' selected') + '>Aktif</option><option value="nonaktif"' + (w && w.status !== 'aktif' ? ' selected' : '') + '>Nonaktif</option></select></div></div>' +
-      '<div class="mt-3"><label class="form-label">Username login</label><input class="form-control" id="wgU" maxlength="30" autocapitalize="off" autocomplete="off" value="' + esc(w ? w.username : '') + '" placeholder="' + (w ? '' : 'kosongkan = dibuat otomatis dari nama') + '"><div class="muted mt-1" style="font-size:12px">' + (w ? 'Warga masuk dengan username ini (bukan no. rumah). Jika warga ini anggota regu ronda, hak input jimpitan otomatis aktif di akun yang sama — tidak perlu akun baru.' : 'Warga masuk dengan username ini + PIN bawaan. Contoh otomatis: budi.santoso. Huruf kecil, angka, titik, garis bawah, atau tanda hubung.') + '</div></div>',
+      '<div class="mt-3"><label class="form-label">Username login</label><input class="form-control" id="wgU" maxlength="30" autocapitalize="off" autocomplete="off" value="' + esc(w ? w.username : '') + '" placeholder="' + (w ? '' : 'kosongkan = dibuat otomatis dari nama') + '"><div class="muted mt-1" style="font-size:12px">' + (w ? 'Warga masuk dengan username ini (bukan no. rumah). Jika warga ini anggota regu ronda, hak input jimpitan otomatis aktif di akun yang sama — tidak perlu akun baru. Tersimpan di sheet <b>Users</b> dan dicerminkan di kolom <b>username</b> sheet <b>Warga</b>.' : 'Warga masuk dengan username ini + PIN bawaan. Contoh otomatis: budi.santoso. Huruf kecil, angka, titik, garis bawah, atau tanda hubung.') + '</div></div>',
     foot: (w ? '<button class="btn btn-danger-soft" data-act="wgDel" data-id="' + w.id + '"><i class="bi bi-trash"></i></button>' : '') + (w && w.user_id ? '<button class="btn btn-ghost" data-act="usReset" data-id="' + w.user_id + '"><i class="bi bi-key"></i> Reset PIN</button>' : '') + '<button class="btn btn-ghost" data-bs-dismiss="modal">Batal</button><button class="btn btn-brand" id="wgOk">Simpan</button>',
-    onShow() { $('#wgOk').onclick = ev2 => act(ev2.currentTarget, async () => { const r = await apiW('wargaSimpan', { id: w ? w.id : '', nama_kk: $('#wgN').value, no_rumah: $('#wgR').value, no_hp: $('#wgH').value, tgl_mulai: $('#wgM').value, status: $('#wgS').value, username: $('#wgU').value.trim() }); toast('Data warga disimpan.'); invalidate(); S.loaded.master = Date.now(); mdWarga(); if (!w) showAkunBaru([{ nama: $('#wgN').value.trim(), username: r.username, pin: r.pin }]); else Mdl.close(); }); }
+    onShow() { $('#wgOk').onclick = ev2 => act(ev2.currentTarget, async () => { const r = await apiW('wargaSimpan', { id: w ? w.id : '', nama_kk: $('#wgN').value, no_rumah: $('#wgR').value, no_hp: $('#wgH').value, tgl_mulai: $('#wgM').value, status: $('#wgS').value, username: $('#wgU').value.trim() }); toast('Data warga disimpan' + (r.username ? ' — username: ' + r.username : '') + '.'); invalidate(); S.loaded.master = Date.now(); mdWarga(); if (!w) showAkunBaru([{ nama: $('#wgN').value.trim(), username: r.username, pin: r.pin }]); else Mdl.close(); }); }
   });
 };
 ACT.wgDel = async b => {
@@ -1287,7 +1309,7 @@ PAGES.pengaturan = {
 };
 TABS.pg = async v => {
   PG.tab = v; const body = $('#pgBody'); body.innerHTML = '<div class="c">' + skel(5) + '</div>';
-  try { await ({ umum: pgUmum, wa: pgWa, user: pgUser, sis: pgSis, log: pgLog }[v])(); } catch (e) { body.innerHTML = '<div class="c">' + emptyH('wifi-off', e.message) + '</div>'; }
+  try { await ({ umum: pgUmum, wa: pgWa, user: pgUser, sis: async () => { await pgSis(); await loadAkunCard(); }, log: pgLog }[v])(); } catch (e) { body.innerHTML = '<div class="c">' + emptyH('wifi-off', e.message) + '</div>'; }
 };
 function pgUmum() {
   const c = S.boot.cfg;
@@ -1338,6 +1360,36 @@ ACT.usReset = async b => {
 };
 ACT.usDel = async b => { if (!(await confirmBox('Hapus pengguna ini?', 'Hapus', true))) return; act(null, async () => { await apiW('userHapus', { id: b.dataset.id }); Mdl.close(); toast('Pengguna dihapus.'); S.loaded.pengaturan = Date.now(); pgUser(); }); };
 
+async function loadAkunCard() {
+  const body = $('#pgBody'); if (!body || PG.tab !== 'sis') return;
+  let st;
+  try { st = await api('akunStatus'); }
+  catch (e) { body.insertAdjacentHTML('afterbegin', '<div class="c" id="akunCard"><h6 class="c-t">Akun &amp; username</h6><div class="insight warn"><i class="bi bi-exclamation-triangle"></i><div>Tidak dapat memeriksa akun: ' + esc(e.message) + '<br>Pastikan backend Apps Script sudah versi terbaru (≥ ' + MIN_BACKEND + ').</div></div></div>'); return; }
+  const row = (t, n, ket) => '<div class="list-i"><div class="grow"><div class="t" style="white-space:normal">' + t + '</div><div class="s" style="white-space:normal">' + (n ? ket : 'Sudah rapi') + '</div></div><span class="sb ' + (n ? 'kurang' : 'lunas') + '">' + n + '</span></div>';
+  const lama = st.petugasLama || [];
+  body.insertAdjacentHTML('afterbegin', '<div class="c" id="akunCard"><h6 class="c-t">Akun &amp; username</h6><div class="muted mb-2" style="font-size:12px">Backend v' + esc(st.versi) + ' · Aplikasi v' + esc(CFG.VERSION || '?') + '</div>' +
+    row('Akun petugas terpisah (mis. <b>ronda.budi</b>)', st.petugasTerpisah.length, 'akan dihapus dari sheet Users; petugas login dengan username warganya' + (st.petugasTerpisah.length ? ': ' + esc(st.petugasTerpisah.join(', ')) : '')) +
+    row('Username warga masih berupa no. rumah', st.usernameAngka, 'akan diganti username dari nama (mis. budi.santoso)') +
+    row('Warga aktif tanpa akun login', st.tanpaAkun, 'akan dibuatkan akun (PIN awal = PIN bawaan)') +
+    (lama.length ? '<div class="insight warn mt-2"><i class="bi bi-person-exclamation"></i><div>Akun petugas lama tanpa tautan ke warga: <b>' + esc(lama.join(', ')) + '</b>. Masukkan orangnya ke regu ronda lewat akun warganya, lalu hapus akun ini di <b>Pengguna</b>.</div></div>' : '') +
+    (st.rapi ? '<div class="insight ok mt-2"><i class="bi bi-check-circle"></i><div>Semua akun sudah rapi. Petugas ronda = warga anggota regu, login dengan username warga.</div></div>' : (st.petugasTerpisah.length || st.usernameAngka || st.tanpaAkun ? '<button class="btn btn-brand w-100 mt-3" data-act="akunRapikan"><i class="bi bi-magic"></i> Rapikan akun sekarang</button>' : '')) +
+    '<div class="muted mt-2" style="font-size:12px">Username disimpan di sheet <b>Users</b> (kolom <i>username</i>) dan dicerminkan di kolom <i>username</i> sheet <b>Warga</b>. Ubah lewat aplikasi, bukan langsung di sheet.</div></div>');
+}
+ACT.akunRapikan = async b => {
+  if (!(await confirmBox('Rapikan akun? Username warga berupa no. rumah akan diganti username dari nama, dan akun petugas terpisah dihapus. Riwayat setoran tetap utuh.', 'Rapikan'))) return;
+  act(b, async () => {
+    const r = await apiW('akunMigrasi', {});
+    const txt = r.username.map(a => a.nama + ' — username baru: ' + a.username).join('\n');
+    Mdl.open({
+      title: 'Akun dirapikan',
+      body: '<div class="insight ok"><i class="bi bi-check-circle"></i><div><b>' + r.username.length + '</b> username warga diganti · <b>' + r.petugas.length + '</b> akun petugas terpisah dihapus · <b>' + r.akunBaru.length + '</b> akun warga dibuat · <b>' + r.jimpitan + '</b> setoran dialihkan ke akun warga.</div></div>' +
+        (r.username.length ? '<p class="muted mb-2" style="font-size:13px">Beritahu warga username barunya (login dengan no. rumah tidak berlaku lagi):</p>' + r.username.map(a => '<div class="list-i"><span class="avatar">' + esc(ini(a.nama)) + '</span><div class="grow"><div class="t">' + esc(a.nama) + '</div><div class="s">' + esc(a.lama) + ' → <b>' + esc(a.username) + '</b></div></div></div>').join('') : '') +
+        (r.akunBaru.length ? '<p class="muted mt-3 mb-2" style="font-size:13px">Akun baru (PIN awal = PIN bawaan):</p>' + r.akunBaru.map(a => '<div class="list-i"><div class="grow"><div class="t">' + esc(a.nama) + '</div><div class="s">username: <b>' + esc(a.username) + '</b></div></div></div>').join('') : ''),
+      foot: (r.username.length ? '<button class="btn btn-ghost" data-act="copyAkun" data-txt="' + esc(txt) + '"><i class="bi bi-clipboard"></i> Salin daftar</button>' : '') + '<button class="btn btn-brand" data-bs-dismiss="modal">Mengerti</button>'
+    });
+    S.wargaList = null; invalidate(); TABS.pg('sis');
+  });
+};
 async function pgSis() {
   const s = await api('sistem'), n = Math.max(1, Perf.n);
   $('#pgBody').innerHTML = '<div class="c"><h6 class="c-t">Penyimpanan</h6><div class="mb-3"><label class="form-label">ID Spreadsheet database</label><input class="form-control" id="ssId" value="' + esc(s.SPREADSHEET_ID) + '"></div><div class="mb-3"><label class="form-label">ID Folder bukti (Drive)</label><input class="form-control" id="sfId" value="' + esc(s.BUKTI_FOLDER_ID) + '"></div>' + (s.url ? '<a class="btn btn-ghost w-100 mb-2" target="_blank" rel="noopener" href="' + esc(s.url) + '"><i class="bi bi-box-arrow-up-right"></i> Buka spreadsheet</a>' : '') + '<button class="btn btn-brand w-100" data-act="ssSimpan">Simpan ID</button><div class="muted mt-2" style="font-size:12.5px">Ubah hanya jika memindahkan database. ID salah membuat aplikasi tidak bisa membaca data.</div></div>' +
@@ -1360,7 +1412,7 @@ PAGES.menu = {
     $('#pg-menu').innerHTML = '<div class="c d-flex align-items-center gap-3"><span class="avatar" style="width:52px;height:52px;font-size:18px">' + esc(ini(u.nama)) + '</span><div><b style="font-size:17px">' + esc(u.nama) + '</b><div class="muted">' + (u.role === 'petugas' && u.base === 'warga' ? 'Warga · Petugas ronda' : RL[u.role]) + ' · @' + esc(u.username) + '</div></div></div>' +
       (rest.length ? '<div class="c mt-3">' + rest.map(n => '<div class="list-i" data-act="nav" data-p="' + n.id + '" style="cursor:pointer"><div class="dot"><i class="bi bi-' + n.i + '"></i></div><div class="grow t">' + navTitle(n.id) + '</div><i class="bi bi-chevron-right muted"></i></div>').join('') + '</div>' : '') +
       '<div class="c mt-3"><div class="list-i" data-act="theme" style="cursor:pointer"><div class="dot"><i class="bi bi-moon-stars"></i></div><div class="grow t">Mode gelap / terang</div></div><div class="list-i" data-act="pin" style="cursor:pointer"><div class="dot"><i class="bi bi-key"></i></div><div class="grow t">Ganti PIN</div></div><div class="list-i" data-act="logout" style="cursor:pointer"><div class="dot" style="background:var(--bad-soft);color:var(--bad)"><i class="bi bi-box-arrow-right"></i></div><div class="grow t">Keluar</div></div></div>' +
-      '<div class="text-center muted mt-3" style="font-size:12px">Jimpitan RT v2.4 · ' + esc(S.boot.cfg.NAMA_RT) + '</div>';
+      '<div class="text-center muted mt-3" style="font-size:12px">Jimpitan RT v2.4.1 · ' + esc(S.boot.cfg.NAMA_RT) + '</div>';
   }
 };
 

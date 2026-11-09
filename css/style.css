@@ -327,3 +327,8 @@ h1,h2,h3,h4,h5,h6,.h1,.h2,.h3,.h4,.h5,.h6{color:var(--text);font-weight:800;lett
 /* tombol flash di atas video scan */
 .flash-btn{position:absolute;top:10px;right:10px;z-index:3;width:46px;height:46px;border-radius:50%;border:0;background:rgba(0,0,0,.55);color:#fff;font-size:21px;display:grid;place-items:center;transition:background .15s,box-shadow .15s}
 .flash-btn.on{background:var(--amber);color:#3b2400;box-shadow:0 0 22px rgba(245,158,11,.85)}
+
+/* peringatan backend belum diperbarui */
+.ver-warn{position:fixed;left:10px;right:10px;top:calc(8px + env(safe-area-inset-top,0px));z-index:3000;background:var(--warn-soft);color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 35%,transparent);border-radius:16px;padding:12px 40px 12px 14px;font-size:12.5px;font-weight:600;line-height:1.45;box-shadow:0 16px 36px -14px rgba(0,0,0,.45);max-width:720px;margin:0 auto}
+.ver-warn code{background:rgba(0,0,0,.08);padding:1px 5px;border-radius:5px;font-size:12px}
+.ver-warn .vw-x{position:absolute;right:8px;top:6px;border:0;background:transparent;color:inherit;font-size:22px;line-height:1;width:30px;height:30px}

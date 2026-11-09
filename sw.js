@@ -1,8 +1,8 @@
 /* Service worker Jimpitan RT — cangkang aplikasi tetap bisa dibuka saat offline.
  * Strategi: network-first untuk file situs ini (selalu versi terbaru bila online),
  * stale-while-revalidate untuk CDN. Panggilan API (POST) TIDAK pernah disentuh. */
-const V = 'sikas-shell-v2.4.0', CDN = 'sikas-cdn-v1';
-const SHELL = ['./', 'index.html', 'css/style.css?v=2.4.0', 'js/config.js?v=2.4.0', 'js/app.js?v=2.4.0', 'manifest.webmanifest', 'icons/icon-192.png'];
+const V = 'sikas-shell-v2.4.1', CDN = 'sikas-cdn-v1';
+const SHELL = ['./', 'index.html', 'css/style.css?v=2.4.1', 'js/config.js?v=2.4.1', 'js/app.js?v=2.4.1', 'manifest.webmanifest', 'icons/icon-192.png'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()).catch(() => self.skipWaiting()));
