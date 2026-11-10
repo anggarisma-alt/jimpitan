@@ -3,6 +3,6 @@
  *  Tempel URL Web App Google Apps Script (berakhiran /exec) di GAS_URL.
  * ===================================================================== */
 const CFG = {
-  GAS_URL: 'https://script.google.com/macros/s/AKfycbyouHnfWr0uu5vEA_7rkjsRHrjr5iFRuzriHJnoCQy5DcZETXWUj28lb-fAquYdp6qi/exec',
-  VERSION: '2.1.0'
+  GAS_URL: 'https://script.google.com/macros/s/AKfycbzjnvSxLlpu5BTCbFkDbxGXkPYGv5585t4rf6Jl8RA-jr3MQ7aND2drKViOCIUUvx73/exec',
+  VERSION: '2.4.1'
 };
